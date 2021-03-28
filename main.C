@@ -15,6 +15,7 @@
 #include <TF1.h>
 #include <TStyle.h>
 #include <TDirectory.h>
+#include <TTree.h>
 
 
 
@@ -23,47 +24,50 @@ using namespace std;
 class WaveAnalysis{
 public:
 
-    string title1 = "";
-    string title2 = "";
+    string title1 = ""; // ref
+    string title2 = ""; // dut
     string fout_title = "";
 
     int STEP; //402 or 802
-    int WAVE_POLARITY = 0; // positive = 1, negitive = 0 
-    string SENSOR_TYPE = "LGAD"; //LGAD or PIN
+    double WAVE1_POLARITY = -1; // positive = 1, negitive = -1
+    double WAVE2_POLARITY = 1; // positive = 1, negitive = -1
+    
+    string SENSOR_TYPE = "LGAD"; 
 
-
-    double DELTA_TIME = 0.025;
+    double DELTA_TIME = 0.025; // [ns]
 
     double THRESHOLD = 15; //[mv]
-    double Q_THREHOLD = 1000; //[fC] PIN:50[fC] LGAD:400[fC]
-    double PEAK_THRESHOLD = 45; //[mV]
+    //double THRESHOLD = 1; //[mv]
+    //double Q_THREHOLD = 0.001; //[fC]
+    double Q_THREHOLD = 0.5; //[fC]
+    double PEAK_THRESHOLD = 15; //[mV]
 
-    double N = 5000;
-    double BASELINE_START = 0;
-    double BASELINE_STOP = 4;
+    double N = 3700;
+    double BASELINE_START = 0; //[ns]
+    double BASELINE_STOP = 4; //[ns]
 
     double AMPLIFIER_TIMS = 160;
-    int SIGNAL_FLAG = 0;
+    int SIGNAL_FLAG = 1;
 
     TFile *FOUT;
     TDirectory *WAVED;
-    
+    TTree *TREE;
 
     WaveAnalysis(string t1, string t2);
 
     ~WaveAnalysis();
 
     void Charge_distribution(double gate_width);
-    void RiseTime_Distribution(double gate_width);
     void CFD();
     void FullAnalysis();
 
 private:
+
     int get_steps(string title);
     double *get_peak_parameters(double *waveform_point);
     double get_baseline(double *waveform_point, double win_start, double win_stop);
     double get_charge(TString file,double baseline,int step,int gate_width);
-    void get_waveform_data(string file,double *waveform);
+    void get_waveform_data(string file,double *waveform,double wave_polarity);
     double get_CFD(double *waveform,double baseline,double CFD,double peakV,double peakP);
 
 };
@@ -89,11 +93,16 @@ void WaveAnalysis::Charge_distribution(double gate_width){
 
     SIGNAL_FLAG = 1;
 
+    double *peak;
+    double peakV;
+    double peakP;
+    double charge,rise_time, baseline;
 
-    TH1F *hist_charge = new TH1F("hist_charge","charge spectrum",100,0,20000);
-    TH1F *hist_peak = new TH1F("hist_peak","peak spectrum",100,0,700);
-    TH1F *hist_rise_time = new TH1F("hist_rise_time","rise time spectrum", 100,0,5);
-    TH1F *hist_noise = new TH1F("hist_noise","noise spectrum",100,-10,10);
+    TREE = new TTree("tree","tree");
+    TREE->Branch("charge",&charge,"charge/D");
+    TREE->Branch("peak",&peakV,"peak/D");
+    TREE->Branch("rise_time",&rise_time,"rise_time/D");
+    TREE->Branch("baseline",&baseline,"noise/D");
 
     STEP = get_steps(title2);
 
@@ -101,8 +110,6 @@ void WaveAnalysis::Charge_distribution(double gate_width){
 
     double waveform_point[STEP];
 
-    double *peak,peakV,peakP,baseline;
-    double rise_time;
 
 
     for(int i =0; i<N; i++){
@@ -111,7 +118,7 @@ void WaveAnalysis::Charge_distribution(double gate_width){
         sprintf(Istr,"%05d",i);
     
         file= title2+Istr;
-        get_waveform_data(file,waveform_point);
+        get_waveform_data(file,waveform_point, WAVE2_POLARITY);
         peak = get_peak_parameters(waveform_point);
         peakV = peak[0];  
         peakP = peak[1];
@@ -149,7 +156,9 @@ void WaveAnalysis::Charge_distribution(double gate_width){
         }
 
         Q-=count_point*baseline;
-        Q*=20*DELTA_TIME; //[fC]
+        Q*=20*DELTA_TIME/AMPLIFIER_TIMS; //   Q = wave * 1/1000 / 50 ohm * 1E-9 *1E15 = 20 * wave
+
+        charge = Q;
 
         if (peakV>THRESHOLD && Q>Q_THREHOLD){
             
@@ -159,50 +168,16 @@ void WaveAnalysis::Charge_distribution(double gate_width){
             cout<<"Rise Time: "<<rise_time<<"  ns"<<endl;
             cout<<"Noise: "<<baseline<<" mV"<<endl;
 
-            hist_charge->Fill(Q);
-            hist_peak->Fill(peakV);
-            hist_rise_time->Fill(rise_time);
-            hist_noise->Fill(baseline);
+            TREE->Fill();
+
         }
         
     }
 
-    TCanvas *canvas_charge = new TCanvas("canvas_charge","Charge_distribution",200,10,1000,500);
-    canvas_charge->SetGrid();
-    //hist_charge->Draw();
-    hist_charge->SetLineWidth(2);
-    hist_charge->SetLineColor(1);
-    hist_charge->GetXaxis()->SetTitle("Charge [fC]");
-    hist_charge->GetYaxis()->SetTitle("Count");
-    hist_charge->GetYaxis()->SetTitleOffset(1.3);
-
-    //hist_peak->Draw();                                   
-    hist_peak->SetLineWidth(2);                          
-    hist_peak->SetLineColor(1);                          
-    hist_peak->GetXaxis()->SetTitle(" Amplitude [mv]");      
-    hist_peak->GetYaxis()->SetTitle("Count");            
-    hist_peak->GetYaxis()->SetTitleOffset(1.3);          
-
-    //hist_rise_time->Draw();                                   
-    hist_rise_time->SetLineWidth(2);                          
-    hist_rise_time->SetLineColor(1);                          
-    hist_rise_time->GetXaxis()->SetTitle(" Rise Time [ns]");  
-    hist_rise_time->GetYaxis()->SetTitle("Count");            
-    hist_rise_time->GetYaxis()->SetTitleOffset(1.3);          
-
-    //hist_noise->Draw();
-    hist_noise->SetLineWidth(2);
-    hist_noise->SetLineColor(1);
-    hist_noise->GetXaxis()->SetTitle(" Amplitude [mV]");   
-    hist_noise->GetYaxis()->SetTitle("Count");             
-    hist_noise->GetYaxis()->SetTitleOffset(1.3);           
 
     FOUT->cd();
-    hist_charge->Write("hist_charge");
-    hist_peak->Write("hist_peak");
-    hist_rise_time->Write("hist_rise_time");
-    hist_noise->Write("hist_noise");
 
+    TREE->Write();
 
 }
 
@@ -223,15 +198,19 @@ void WaveAnalysis::CFD(){
     double baseline1,baseline2;
     double CFDt1,CFDt2,CFDt;
 
-    TH1F *h1=new TH1F("Cap10_0.1","CFD-0.1",500,-1,1);
-    TH1F *h2=new TH1F("Cap10_0.2","CFD-0.2",500,-1,1);
-    TH1F *h3=new TH1F("Cap10_0.3","CFD-0.3",500,-1,1);
-    TH1F *h4=new TH1F("Cap10_0.4","CFD-0.4",500,-1,1);
-    TH1F *h5=new TH1F("Cap10_0.5","CFD-0.5",500,-1,1);
-    TH1F *h6=new TH1F("Cap10_0.6","CFD-0.6",500,-1,1);
-    TH1F *h7=new TH1F("Cap10_0.7","CFD-0.7",500,-1,1);
-    TH1F *h8=new TH1F("Cap10_0.8","CFD-0.8",500,-1,1);
-    TH1F *h9=new TH1F("Cap10_0.9","CFD-0.9",500,-1,1);
+    double xmin = -6; //[ps]
+    double xmax = -4; //[ps]
+    int nbin = 100;
+
+    TH1F *h1=new TH1F("Cap10_0.1","CFD-0.1",nbin,xmin,xmax);
+    TH1F *h2=new TH1F("Cap10_0.2","CFD-0.2",nbin,xmin,xmax);
+    TH1F *h3=new TH1F("Cap10_0.3","CFD-0.3",nbin,xmin,xmax);
+    TH1F *h4=new TH1F("Cap10_0.4","CFD-0.4",nbin,xmin,xmax);
+    TH1F *h5=new TH1F("Cap10_0.5","CFD-0.5",nbin,xmin,xmax);
+    TH1F *h6=new TH1F("Cap10_0.6","CFD-0.6",nbin,xmin,xmax);
+    TH1F *h7=new TH1F("Cap10_0.7","CFD-0.7",nbin,xmin,xmax);
+    TH1F *h8=new TH1F("Cap10_0.8","CFD-0.8",nbin,xmin,xmax);
+    TH1F *h9=new TH1F("Cap10_0.9","CFD-0.9",nbin,xmin,xmax);
 
     for(int i=0; i<N; i++){
         //if (i == 2737){continue;}
@@ -242,8 +221,8 @@ void WaveAnalysis::CFD(){
         file1 = title1+Istr;
         file2 = title2+Istr;
         
-        get_waveform_data(file1,waveform_point1);
-        get_waveform_data(file2,waveform_point2);
+        get_waveform_data(file1,waveform_point1, WAVE1_POLARITY);
+        get_waveform_data(file2,waveform_point2, WAVE2_POLARITY);
 
         peak1 = get_peak_parameters(waveform_point1);
         peakV1 = peak1[0];
@@ -262,6 +241,8 @@ void WaveAnalysis::CFD(){
                 CFDt1 = get_CFD(waveform_point1,baseline1,CFD,peakV1,peakP1);
                 CFDt2 = get_CFD(waveform_point2,baseline2,CFD,peakV2,peakP2);
                 CFDt = CFDt1-CFDt2;
+
+                cout<<"CFDt :"<<CFDt<<endl;
 
                 int intCFD = CFD*10+0.1;
                 
@@ -313,11 +294,11 @@ void WaveAnalysis::CFD(){
     h1->Fit(g);
     g->GetParameters(&par[0]);
     
-    h1->SetLineWidth(2);
-    h1->SetLineColor(1);
-    h1->GetXaxis()->SetTitle("CFDt [ns]");
-    h1->GetYaxis()->SetTitle("Count");
-    h1->GetYaxis()->SetTitleOffset(1.3);
+    h5->SetLineWidth(2);
+    h5->SetLineColor(1);
+    h5->GetXaxis()->SetTitle("T_{DUT}-T_{Ref} [ns]");
+    h5->GetYaxis()->SetTitle("Count");
+    h5->GetYaxis()->SetTitleOffset(1.3);
 
 
     canvas_time->cd(2); h2->Draw();h2->Fit(g); g->GetParameters(&par[3]);
@@ -351,7 +332,7 @@ void WaveAnalysis::FullAnalysis(){
 
 int WaveAnalysis::get_steps(string title){
 
-    string tmp_csvs = title+"00000.csv";
+    string tmp_csvs = title+"00000.txt";
 
     const char *tmp_csvchar = tmp_csvs.c_str();
 
@@ -365,11 +346,11 @@ int WaveAnalysis::get_steps(string title){
 
 
 
-void WaveAnalysis::get_waveform_data(string file,double *waveform){
+void WaveAnalysis::get_waveform_data(string file,double *waveform, double wave_polarity){
 
-    cout<<"\nReading :  "<<file+".csv"<<endl;
+    cout<<"\nReading :  "<<file+".txt"<<endl;
     
-    string tmp_csvs = file+".csv";
+    string tmp_csvs = file+".txt";
     const char *tmp_csvchar = tmp_csvs.c_str();
 
     TGraph *tmp_g = new TGraph(tmp_csvchar,"%lf,%lf");
@@ -386,9 +367,7 @@ void WaveAnalysis::get_waveform_data(string file,double *waveform){
 
     for (int i=0; i<num_point; i++){
         tmp_time[i] = i*DELTA_TIME;
-        if(WAVE_POLARITY == 0){
-            waveform[i] = tmp_waveformY[i]*(-1000);
-        }
+        waveform[i] = tmp_waveformY[i]*(1000)*wave_polarity;
     }
 
     if(SIGNAL_FLAG == 1){
@@ -531,6 +510,46 @@ double WaveAnalysis::get_CFD(double *waveform,double baseline,double CFD,double 
 int main()
 {
 
+    gStyle->SetOptStat("e");
+    //gStyle->SetOptStat(0000);
+    gStyle->SetOptFit(111);
+    gStyle->SetStatX(0.9);
+    gStyle->SetStatY(0.9);
+    gStyle->SetStatW(0.18);
+    gStyle->SetStatH(0.22);
+
+    // No Canvas Border                  
+    gStyle->SetCanvasBorderMode(0);      
+    gStyle->SetCanvasBorderSize(0);      
+    // White BG                          
+    gStyle->SetCanvasColor(10);          
+    // Format for axes                   
+    gStyle->SetLabelFont(42,"xyz");      
+    gStyle->SetLabelSize(0.04,"xyz");    
+    gStyle->SetLabelOffset(0.01,"xyz");  
+    gStyle->SetNdivisions(510,"xyz");    
+    gStyle->SetTitleFont(42,"xyz");      
+    gStyle->SetTitleColor(1,"xyz");      
+    gStyle->SetTitleSize(0.05,"xyz");    
+    gStyle->SetTitleOffset(1.5,"xyz");  
+    // No pad borders                    
+    gStyle->SetPadBorderMode(0);         
+    gStyle->SetPadBorderSize(0);         
+    // White BG                          
+    gStyle->SetPadColor(10);             
+    // Margins for labels etc.           
+    gStyle->SetPadLeftMargin(0.15);      
+    gStyle->SetPadBottomMargin(0.15);    
+    //gStyle->SetPadRightMargin(0.05);     
+    //gStyle->SetPadTopMargin(0.05);       
+    // No error bars in x direction      
+    gStyle->SetErrorX(0);                
+    // Format legend                     
+    gStyle->SetLegendBorderSize(0); 
+
+
+
+
 //W7-II-L1-15-70
     
     //string W7_350V_t1 = "/home/admin/STDB/BetaTest/IMEV1beta/B58_1_A3_W7-II-F5-L1-15_70_beta/220V_350V/C2BiasV";         
@@ -616,10 +635,10 @@ int main()
 
 //W8-IV-L1-15-70
 
-  string w8_180V_t1 = "/home/admin/STDB/BetaTest/data/IMEV1beta/B58_1_A3_W8-IV-E4-L1-15-70-beta/200V_180V/C2BiasV";         
-  string w8_180V_t2 = "/home/admin/STDB/BetaTest/data/IMEV1beta/B58_1_A3_W8-IV-E4-L1-15-70-beta/200V_180V/C3BiasV";         
-  WaveAnalysis W8_180V(w8_180V_t1,w8_180V_t2);                                                                                                                                                                                                 
-  W8_180V.FullAnalysis();  
+  //string w8_180V_t1 = "/home/admin/STDB/BetaTest/data/IMEV1beta/B58_1_A3_W8-IV-E4-L1-15-70-beta/200V_180V/C2BiasV";         
+  //string w8_180V_t2 = "/home/admin/STDB/BetaTest/data/IMEV1beta/B58_1_A3_W8-IV-E4-L1-15-70-beta/200V_180V/C3BiasV";         
+  //WaveAnalysis W8_180V(w8_180V_t1,w8_180V_t2);                                                                                                                                                                                                 
+  //W8_180V.FullAnalysis();  
 
 
   // string w8_170V_t1 = "/home/admin/STDB/BetaTest/IMEV1beta/B58_1_A3_W8-IV-E4-L1-15_70_beta/200V_170V/C2BiasV";         
@@ -664,10 +683,10 @@ int main()
   // W8_110V.FullAnalysis();  
 
 
-  // string w8_100V_t1 = "/home/admin/STDB/BetaTest/IMEV1beta/B58_1_A3_W8-IV-E4-L1-15_70_beta/200V_100V/C2BiasV";         
-  // string w8_100V_t2 = "/home/admin/STDB/BetaTest/IMEV1beta/B58_1_A3_W8-IV-E4-L1-15_70_beta/200V_100V/C3BiasV";         
-  // WaveAnalysis W8_100V(w8_100V_t1,w8_100V_t2);                                                                                                                                                                                                 
-  // W8_100V.FullAnalysis();  
+  //string w8_100V_t1 = "/home/admin/STDB/BetaTest/IMEV1beta/B58_1_A3_W8-IV-E4-L1-15_70_beta/200V_100V/C2BiasV";         
+  //string w8_100V_t2 = "/home/admin/STDB/BetaTest/IMEV1beta/B58_1_A3_W8-IV-E4-L1-15_70_beta/200V_100V/C3BiasV";         
+  //WaveAnalysis W8_100V(w8_100V_t1,w8_100V_t2);                                                                                                                                                                                                 
+  //W8_100V.FullAnalysis();  
 
 
   // string w8_90V_t1 = "/home/admin/STDB/BetaTest/IMEV1beta/B58_1_A3_W8-IV-E4-L1-15_70_beta/200V_90V/C2BiasV";         
@@ -786,10 +805,37 @@ int main()
     //WaveAnalysis PIN_50V(PIN_50V_t1,PIN_50V_t2);
     //PIN_50V.Charge_distribution(4);
 
-   // string w8_180V_t1 = "/home/admin/STDB/BetaTest/data/IMEV1beta/One_Chanel/w8-IV-E4-L1-15-70-beta/w8-IV-E4-L1-15_70_beta_180V/C3BiasV";
-   // string w8_180V_t2 = "/home/admin/STDB/BetaTest/data/IMEV1beta/One_Chanel/w8-IV-E4-L1-15-70-beta/w8-IV-E4-L1-15_70_beta_180V/C3BiasV";
-   // WaveAnalysis W8_180V(w8_180V_t1,w8_180V_t2);
-   // W8_180V.Charge_distribution(4);
+    //string w8_180V_t1 = "/home/admin/STDB/BetaTest/data/IMEV1beta/One_Chanel/w8-IV-E4-L1-15-70-beta/w8-IV-E4-L1-15_70_beta_180V/C3BiasV";
+    //string w8_180V_t2 = "/home/admin/STDB/BetaTest/data/IMEV1beta/One_Chanel/w8-IV-E4-L1-15-70-beta/w8-IV-E4-L1-15_70_beta_180V/C3BiasV";
+    //WaveAnalysis W8_180V(w8_180V_t1,w8_180V_t2);
+    //W8_180V.Charge_distribution(4);
+
+
+
+//-----------------------------------------------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------------------------------------------
+
+    string SiC_PIN_500V_t1 = "/home/admin/STDB/BetaTest/data/4H-SiC-beta/2021/NJU_SiC_PIN_500V/C2--_2.5GT_Ref_Clock_--";
+    string SiC_PIN_500V_t2 = "/home/admin/STDB/BetaTest/data/4H-SiC-beta/2021/NJU_SiC_PIN_500V/C3--_2.5GT_Ref_Clock_--";
+    WaveAnalysis SiC_PIN_500V(SiC_PIN_500V_t1,SiC_PIN_500V_t2);
+    SiC_PIN_500V.FullAnalysis();
+    
+
+    //string SiC_Noise_500V_t1 = "/home/admin/STDB/BetaTest/data/4H-SiC-beta/2021/Noise/C2--_2.5GT_Ref_Clock_--";
+    //string SiC_Noise_500V_t2 = "/home/admin/STDB/BetaTest/data/4H-SiC-beta/2021/Noise/C3--_2.5GT_Ref_Clock_--";
+    //WaveAnalysis SiC_Noise_500V(SiC_Noise_500V_t1,SiC_Noise_500V_t2);
+    //SiC_Noise_500V.Charge_distribution(4);
+
+    //string NDL_200V_t1 = "/home/admin/STDB/BetaTest/data/4H-SiC-beta/2021/NJU_SiC_PIN_500V/C2--_2.5GT_Ref_Clock_--";
+    //string NDL_200V_t2 = "/home/admin/STDB/BetaTest/data/4H-SiC-beta/2021/NJU_SiC_PIN_500V/C2--_2.5GT_Ref_Clock_--";
+    //WaveAnalysis NDL_200V(NDL_200V_t1,NDL_200V_t2);
+    //NDL_200V.Charge_distribution(4);
+
+    //string NDL_Noise_200V_t1 = "/home/admin/STDB/BetaTest/data/4H-SiC-beta/2021/Noise/C2--_2.5GT_Ref_Clock_--";
+    //string NDL_Noise_200V_t2 = "/home/admin/STDB/BetaTest/data/4H-SiC-beta/2021/Noise/C2--_2.5GT_Ref_Clock_--";
+    //WaveAnalysis NDL_Noise_200V(NDL_Noise_200V_t1,NDL_Noise_200V_t2);
+    //NDL_Noise_200V.Charge_distribution(4);
 
 
 
