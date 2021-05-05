@@ -42,11 +42,11 @@ public:
     double Q_THREHOLD = 0.5; //[fC]
     double PEAK_THRESHOLD = 15; //[mV]
 
-    double N = 3700;
+    double N = 3000;
     double BASELINE_START = 0; //[ns]
     double BASELINE_STOP = 4; //[ns]
 
-    double AMPLIFIER_TIMS = 160;
+    double AMPLIFIER_TIMS = 100;
     int SIGNAL_FLAG = 1;
 
     TFile *FOUT;
@@ -359,7 +359,7 @@ void WaveAnalysis::get_waveform_data(string file,double *waveform, double wave_p
     STEP = num_point;
     cout<<"\nNum Points: "<<num_point<<endl;
 
-    double *tmp_waveformX = tmp_g->GetY();
+    double *tmp_waveformX = tmp_g->GetX();
     double *tmp_waveformY = tmp_g->GetY();
 
     double tmp_time[num_point];
@@ -816,8 +816,8 @@ int main()
 //
 //-----------------------------------------------------------------------------------------------------------------
 
-    string SiC_PIN_500V_t1 = "/home/admin/STDB/BetaTest/data/4H-SiC-beta/2021/NJU_SiC_PIN_500V/C2--_2.5GT_Ref_Clock_--";
-    string SiC_PIN_500V_t2 = "/home/admin/STDB/BetaTest/data/4H-SiC-beta/2021/NJU_SiC_PIN_500V/C3--_2.5GT_Ref_Clock_--";
+    string SiC_PIN_500V_t1 = "/home/admin/STDB/BetaTest/data/4H-SiC-beta/20210215/NJU_SiC_PIN_500V/C2--_2.5GT_Ref_Clock_--";
+    string SiC_PIN_500V_t2 = "/home/admin/STDB/BetaTest/data/4H-SiC-beta/20210215/NJU_SiC_PIN_500V/C3--_2.5GT_Ref_Clock_--";
     WaveAnalysis SiC_PIN_500V(SiC_PIN_500V_t1,SiC_PIN_500V_t2);
     SiC_PIN_500V.FullAnalysis();
     
